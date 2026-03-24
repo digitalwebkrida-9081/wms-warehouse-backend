@@ -18,6 +18,9 @@ const expenseRoutes = require("./routes/expense");
 
 
 
+const authRoutes = require("./routes/auth");
+const authMiddleware = require("./middleware/auth");
+
 const app = express();
 
 // Middleware
@@ -40,16 +43,19 @@ mongoose
     process.exit(1);
   });
 
-// Routes
-app.use("/api/inwards", inwardRoutes);
-app.use("/api/outward", outwardRoutes);
-app.use("/api/billing", billingRoutes);
-app.use("/api/party", partyRoutes);
-app.use("/api/category", categoryRoutes);
-app.use("/api/product", productRoutes);
-app.use("/api/package", packageRoutes);
-app.use("/api/ledger", ledgerRoutes);
-app.use("/api/expenses", expenseRoutes);
+// Auth Routes (unprotected)
+app.use("/api/auth", authRoutes);
+
+// Protected Routes
+app.use("/api/inwards", authMiddleware, inwardRoutes);
+app.use("/api/outward", authMiddleware, outwardRoutes);
+app.use("/api/billing", authMiddleware, billingRoutes);
+app.use("/api/party", authMiddleware, partyRoutes);
+app.use("/api/category", authMiddleware, categoryRoutes);
+app.use("/api/product", authMiddleware, productRoutes);
+app.use("/api/package", authMiddleware, packageRoutes);
+app.use("/api/ledger", authMiddleware, ledgerRoutes);
+app.use("/api/expenses", authMiddleware, expenseRoutes);
 
 
 
