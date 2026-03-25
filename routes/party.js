@@ -4,6 +4,7 @@ const Party = require('../models/Party');
 
 // GET /api/party
 router.get('/', async (req, res) => {
+  console.log("🟡 GET /api/party called with query:", req.query);
   try {
     const page = parseInt(req.query.page) || 1;
     const pageSize = parseInt(req.query.pageSize) || 10;
@@ -22,14 +23,17 @@ router.get('/', async (req, res) => {
         ]
       };
     }
+    console.log("🟡 Query built:", query);
 
     const total = await Party.countDocuments(query);
+    console.log("🟡 Total parties found:", total);
     const start = (page - 1) * pageSize;
 
     const parties = await Party.find(query)
       .sort({ name: 1 })
       .skip(start)
       .limit(pageSize);
+    console.log("🟡 Returned parties count:", parties.length);
 
     res.json({
       data: parties,
@@ -38,8 +42,8 @@ router.get('/', async (req, res) => {
       pageSize
     });
   } catch (error) {
-    console.error(error);
-    res.status(500).json({ error: 'Server Error' });
+    console.error("❌ Error in GET /api/party:", error);
+    res.status(500).json({ error: 'Server Error', details: error.message });
   }
 });
 

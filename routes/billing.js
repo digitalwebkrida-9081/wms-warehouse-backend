@@ -4,6 +4,22 @@ const Inward = require('../models/Inward');
 const Outward = require('../models/Outward');
 const Bill = require('../models/Bill');
 
+// Helper function to get the next available bill number (filling gaps)
+async function getNextBillNumber() {
+  const startingNumber = parseInt(process.env.STARTING_BILL_NUMBER || "1", 10);
+  
+  // Find all bill numbers that follow the 0000 format
+  const allBills = await Bill.find({ billNumber: /^\d{4}$/ }).select('billNumber').sort({ billNumber: 1 });
+  const existingNumbers = new Set(allBills.map(b => parseInt(b.billNumber, 10)));
+  
+  let nextSeq = startingNumber;
+  while (existingNumbers.has(nextSeq)) {
+    nextSeq++;
+  }
+  
+  return String(nextSeq).padStart(4, '0');
+}
+
 // POST /api/billing/generate-from-inwards
 router.post('/generate-from-inwards', async (req, res) => {
   try {
@@ -18,14 +34,8 @@ router.post('/generate-from-inwards', async (req, res) => {
     if (inwards.length === 0) {
       return res.status(400).json({ error: 'No inwards found' });
     }
-    // Generate sequential bill No: exactly 0001, 0002...
-    const startingNumber = parseInt(process.env.STARTING_BILL_NUMBER || "1", 10);
-    const lastValidBill = await Bill.findOne({ billNumber: /^\d{4}$/ }).sort({ billNumber: -1 });
-    let nextSeq = startingNumber;
-    if (lastValidBill && lastValidBill.billNumber) {
-      nextSeq = Math.max(startingNumber, parseInt(lastValidBill.billNumber, 10) + 1);
-    }
-    const billNumber = String(nextSeq).padStart(4, '0'); // exact 0001 format
+    // Generate sequential bill No: filling gaps if any
+    const billNumber = await getNextBillNumber();
 
     const lineItems = inwards.map(inw => {
       // Basic fallback month calculation 
@@ -118,13 +128,7 @@ router.post('/generate-preview', async (req, res) => {
       };
     });
 
-    const startingNumber = parseInt(process.env.STARTING_BILL_NUMBER || "1", 10);
-    const lastValidBill = await Bill.findOne({ billNumber: /^\d{4}$/ }).sort({ billNumber: -1 });
-    let nextSeq = startingNumber;
-    if (lastValidBill && lastValidBill.billNumber) {
-      nextSeq = Math.max(startingNumber, parseInt(lastValidBill.billNumber, 10) + 1);
-    }
-    const billIdSug = String(nextSeq).padStart(4, '0');
+    const billIdSug = await getNextBillNumber();
 
     return res.json({
       billNumber: billIdSug,
@@ -212,6 +216,17 @@ router.put('/:id', async (req, res) => {
     );
     if (!updatedBill) return res.status(404).json({ error: 'Bill not found' });
     res.json(updatedBill);
+  } catch (error) {
+    res.status(500).json({ error: 'Server Error' });
+  }
+});
+
+// DELETE /api/billing/:id
+router.delete('/:id', async (req, res) => {
+  try {
+    const deletedBill = await Bill.findByIdAndDelete(req.params.id);
+    if (!deletedBill) return res.status(404).json({ error: 'Bill not found' });
+    res.json({ message: 'Bill deleted successfully' });
   } catch (error) {
     console.error(error);
     res.status(500).json({ error: 'Server Error' });
