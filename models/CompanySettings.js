@@ -34,6 +34,7 @@ const CompanySettingsSchema = new mongoose.Schema({
   }],
   jurisdiction: { type: String, default: 'SURAT' },
   signatureLabel: { type: String, default: 'Authorized Signatory' },
+  signatureUrl: { type: String, default: '' },
   footerText: { type: String, default: 'THIS IS A COMPUTER GENERATED DOCUMENT' },
 }, {
   timestamps: true

@@ -14,11 +14,6 @@ const ledgerRoutes = require("./routes/ledger");
 const expenseRoutes = require("./routes/expense");
 const settingsRoutes = require("./routes/settings");
 
-
-
-
-
-
 const authRoutes = require("./routes/auth");
 const authMiddleware = require("./middleware/auth");
 
@@ -35,8 +30,8 @@ app.use((req, res, next) => {
 });
 
 // Serve uploaded files (logos etc.)
-const path = require('path');
-app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
+const path = require("path");
+app.use("/uploads", express.static(path.join(__dirname, "uploads")));
 
 // MongoDB Connection
 const MONGODB_URI = process.env.MONGODB_URI;
@@ -70,17 +65,16 @@ app.use("/api/expenses", authMiddleware, expenseRoutes);
 app.use("/api/settings", authMiddleware, settingsRoutes);
 app.use("/api/quotation", authMiddleware, require("./routes/quotation"));
 
-
-
-
-
-
 // Health Check
 app.get("/", (req, res) => {
   res.send("Warehouse API is running...");
 });
 
 const PORT = process.env.PORT || 5001;
-app.listen(PORT, "0.0.0.0", () => {
-  console.log(`🚀 Server is running on port ${PORT}`);
+const server = app.listen(PORT, "0.0.0.0", () => {
+  const address = server.address();
+  console.log(
+    `🚀 Server is running on http://${address.address}:${address.port}`,
+  );
+  console.log(`📅 Started at: ${new Date().toLocaleString()}`);
 });

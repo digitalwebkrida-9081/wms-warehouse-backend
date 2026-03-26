@@ -118,4 +118,59 @@ router.delete('/logo', async (req, res) => {
   }
 });
 
+// POST /api/settings/signature - Upload company signature/stamp
+router.post('/signature', upload.single('signature'), async (req, res) => {
+  try {
+    if (!req.file) {
+      return res.status(400).json({ error: 'No file uploaded' });
+    }
+
+    let settings = await CompanySettings.getSettings();
+
+    // Delete old signature file if it exists
+    if (settings.signatureUrl) {
+      const oldFileName = settings.signatureUrl.split('/uploads/').pop();
+      if (oldFileName) {
+        const oldPath = path.join(uploadsDir, oldFileName);
+        if (fs.existsSync(oldPath)) {
+          fs.unlinkSync(oldPath);
+        }
+      }
+    }
+
+    // Save new signature URL
+    settings.signatureUrl = `/uploads/${req.file.filename}`;
+    await settings.save();
+
+    res.json({ signatureUrl: settings.signatureUrl, message: 'Signature uploaded successfully' });
+  } catch (error) {
+    console.error('Failed to upload signature:', error);
+    res.status(500).json({ error: 'Server Error' });
+  }
+});
+
+// DELETE /api/settings/signature - Remove company signature/stamp
+router.delete('/signature', async (req, res) => {
+  try {
+    let settings = await CompanySettings.getSettings();
+
+    if (settings.signatureUrl) {
+      const fileName = settings.signatureUrl.split('/uploads/').pop();
+      if (fileName) {
+        const filePath = path.join(uploadsDir, fileName);
+        if (fs.existsSync(filePath)) {
+          fs.unlinkSync(filePath);
+        }
+      }
+      settings.signatureUrl = '';
+      await settings.save();
+    }
+
+    res.json({ message: 'Signature removed successfully' });
+  } catch (error) {
+    console.error('Failed to remove signature:', error);
+    res.status(500).json({ error: 'Server Error' });
+  }
+});
+
 module.exports = router;

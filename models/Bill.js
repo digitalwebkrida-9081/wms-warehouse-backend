@@ -12,6 +12,7 @@ const BillSchema = new mongoose.Schema({
     weight: { type: Number },
     remaining: { type: Number },
     inDate: { type: String },
+    outDate: { type: String },
     months: { type: Number },
     rate: { type: Number },
     tax: { type: Number },

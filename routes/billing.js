@@ -37,9 +37,10 @@ router.post('/generate-from-inwards', async (req, res) => {
     // Generate sequential bill No: filling gaps if any
     const billNumber = await getNextBillNumber();
 
-    const lineItems = inwards.map(inw => {
-      // Basic fallback month calculation 
-      // Replace with exact cold logic as needed, assuming 1 month for now if not specified.
+    const lineItems = await Promise.all(inwards.map(async inw => {
+      // Find latest outward for this inward to show as "Out Date"
+      const lastOutward = await Outward.findOne({ inwardId: inw._id }).sort({ outwardDate: -1 });
+
       let months = 1;
       const sub = inw.totalWeight * (inw.price || 0) * months;
       const tax = (sub * (gstRate || 0)) / 100;
@@ -50,28 +51,30 @@ router.post('/generate-from-inwards', async (req, res) => {
         weight: inw.totalWeight,
         remaining: inw.remainingWeight,
         inDate: inw.inwardDate,
+        outDate: lastOutward ? lastOutward.outwardDate : null,
         rate: inw.price || 0,
         months: months,
         tax: gstRate || 0,
         total: sub + tax
       };
-    });
+    }));
 
     const subTotal = lineItems.reduce((acc, item) => acc + (item.weight * item.rate * item.months), 0);
     const taxTotal = lineItems.reduce((acc, item) => acc + (item.total - (item.weight * item.rate * item.months)), 0);
     const grandTotal = subTotal + taxTotal;
-
-    const partyName = inwards[0].partyId; // partyId contains string name in this project
+    const partyName = inwards[0].partyId; 
     const partyData = await Party.findOne({ name: partyName });
+    const outwardDate = req.body.outwardDate || new Date().toISOString().split('T')[0];
 
     const newBill = new Bill({
       billNumber,
       date: new Date().toISOString().split('T')[0],
       partyId: partyName,
-      lineItems,
+      lineItems: lineItems.map(item => ({ ...item, outDate: item.outDate || outwardDate })),
       subTotal,
       taxTotal,
       grandTotal,
+      outwardDate,
       remarks: `Bill for period ${billPeriod}`
     });
 
@@ -104,7 +107,7 @@ router.post('/generate-preview', async (req, res) => {
     let subTotal = 0;
     let taxTotal = 0;
 
-    const lineItems = inwards.map(inw => {
+    const lineItems = await Promise.all(inwards.map(async inw => {
       const rate = inw.price || 0;
       const taxPercent = 0; // Default tax 0, user can edit
       const itemSubTotal = inw.totalWeight * rate;
@@ -114,6 +117,9 @@ router.post('/generate-preview', async (req, res) => {
       subTotal += itemSubTotal;
       taxTotal += itemTaxTotal;
 
+      // Find latest outward for this inward to show as "Out Date"
+      const lastOutward = await Outward.findOne({ inwardId: inw._id }).sort({ outwardDate: -1 });
+
       return {
         inwardId: inw._id,
         description: `${inw.productId} (Inward ${inw.inwardNumber || inw._id.toString().slice(-6)})`,
@@ -121,12 +127,13 @@ router.post('/generate-preview', async (req, res) => {
         weight: inw.totalWeight,
         remaining: inw.remainingWeight,
         inDate: inw.inwardDate,
+        outDate: lastOutward ? lastOutward.outwardDate : null,
         rate: rate,
         months: 1, // Defaulting to 1 month for previews, can be edited
         tax: taxPercent,
         total: itemTotal
       };
-    });
+    }));
 
     const billIdSug = await getNextBillNumber();
 
@@ -137,7 +144,9 @@ router.post('/generate-preview', async (req, res) => {
       lineItems,
       subTotal,
       taxTotal,
-      grandTotal: subTotal + taxTotal
+      grandTotal: subTotal + taxTotal,
+      outwardDate: new Date().toISOString().split('T')[0],
+      storageMonths: 1
     });
   } catch (error) {
     console.error(error);

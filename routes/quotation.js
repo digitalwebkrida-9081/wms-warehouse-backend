@@ -1,6 +1,7 @@
 const express = require('express');
 const router = express.Router();
 const Inward = require('../models/Inward');
+const Outward = require('../models/Outward');
 const Quotation = require('../models/Quotation');
 
 // Helper function to get the next available quotation number (filling gaps)
@@ -33,7 +34,7 @@ router.post('/generate-preview', async (req, res) => {
     let subTotal = 0;
     let taxTotal = 0;
 
-    const lineItems = inwards.map(inw => {
+    const lineItems = await Promise.all(inwards.map(async inw => {
       const rate = inw.price || 0;
       const taxPercent = 0; 
       const itemSubTotal = inw.totalWeight * rate;
@@ -43,6 +44,9 @@ router.post('/generate-preview', async (req, res) => {
       subTotal += itemSubTotal;
       taxTotal += itemTaxTotal;
 
+      // Find latest outward for this inward to show as "Out Date"
+      const lastOutward = await Outward.findOne({ inwardId: inw._id }).sort({ outwardDate: -1 });
+
       return {
         inwardId: inw._id,
         description: `${inw.productId} (Inward ${inw.inwardNumber || inw._id.toString().slice(-6)})`,
@@ -50,12 +54,13 @@ router.post('/generate-preview', async (req, res) => {
         weight: inw.totalWeight,
         remaining: inw.remainingWeight,
         inDate: inw.inwardDate,
+        outDate: lastOutward ? lastOutward.outwardDate : null,
         rate: rate,
         months: 1,
         tax: taxPercent,
         total: itemTotal
       };
-    });
+    }));
 
     const quotationIdSug = await getNextQuotationNumber();
 
@@ -66,7 +71,8 @@ router.post('/generate-preview', async (req, res) => {
       lineItems,
       subTotal,
       taxTotal,
-      grandTotal: subTotal + taxTotal
+      grandTotal: subTotal + taxTotal,
+      outwardDate: new Date().toISOString().split('T')[0]
     });
   } catch (error) {
     console.error(error);
