@@ -91,6 +91,81 @@ router.post('/generate-from-inwards', async (req, res) => {
   }
 });
 
+// POST /api/billing/generate-from-outward
+router.post('/generate-from-outward', async (req, res) => {
+  try {
+    const { outwardIds, billPeriod, gstRate, outwardDate } = req.body;
+    const Party = require('../models/Party'); 
+
+    if (!outwardIds || !Array.isArray(outwardIds)) {
+      return res.status(400).json({ error: 'outwardIds array is required' });
+    }
+
+    const outwards = await Outward.find({ _id: { $in: outwardIds } });
+    if (outwards.length === 0) {
+      return res.status(400).json({ error: 'No outwards found' });
+    }
+
+    // Generate sequential bill No
+    const billNumber = await getNextBillNumber();
+
+    const lineItems = await Promise.all(outwards.map(async out => {
+      // Find parent inward to get the price and product details
+      const parentInward = await Inward.findById(out.inwardId);
+      
+      let months = 1;
+      const rate = parentInward ? (parentInward.price || 0) : 0;
+      const weight = out.outwardWeight;
+      const sub = weight * rate * months;
+      const tax = (sub * (gstRate || 0)) / 100;
+      
+      return {
+        inwardId: out.inwardId,
+        description: `${out.productId} - Released (${billPeriod})`,
+        quantity: 0, // Outwards are usually by weight
+        weight: weight,
+        remaining: 0, 
+        inDate: parentInward ? parentInward.inwardDate : null,
+        outDate: out.outwardDate,
+        rate: rate,
+        months: months,
+        tax: gstRate || 0,
+        total: sub + tax
+      };
+    }));
+
+    const subTotal = lineItems.reduce((acc, item) => acc + (item.weight * item.rate * item.months), 0);
+    const taxTotal = lineItems.reduce((acc, item) => acc + (item.total - (item.weight * item.rate * item.months)), 0);
+    const grandTotal = subTotal + taxTotal;
+    
+    const partyName = outwards[0].partyId;
+    const partyData = await Party.findOne({ name: partyName });
+    const finalOutwardDate = outwardDate || new Date().toISOString().split('T')[0];
+
+    const newBill = new Bill({
+      billNumber,
+      date: new Date().toISOString().split('T')[0],
+      partyId: partyName,
+      lineItems,
+      subTotal,
+      taxTotal,
+      grandTotal,
+      outwardDate: finalOutwardDate,
+      remarks: `Outward Bill for period ${billPeriod}`
+    });
+
+    await newBill.save();
+    
+    res.status(201).json({
+      bill: newBill,
+      partyDetails: partyData || {}
+    });
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ error: 'Server Error' });
+  }
+});
+
 
 // POST /api/billing/generate-preview
 // returns data needed for the frontend bill-creation screen
@@ -236,6 +311,21 @@ router.delete('/:id', async (req, res) => {
     const deletedBill = await Bill.findByIdAndDelete(req.params.id);
     if (!deletedBill) return res.status(404).json({ error: 'Bill not found' });
     res.json({ message: 'Bill deleted successfully' });
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ error: 'Server Error' });
+  }
+});
+
+// DELETE /api/billing (Bulk Delete)
+router.post('/bulk-delete', async (req, res) => {
+  try {
+    const { ids } = req.body;
+    if (!ids || !Array.isArray(ids)) {
+      return res.status(400).json({ error: 'ids array is required' });
+    }
+    const result = await Bill.deleteMany({ _id: { $in: ids } });
+    res.json({ message: `${result.deletedCount} bills deleted successfully` });
   } catch (error) {
     console.error(error);
     res.status(500).json({ error: 'Server Error' });

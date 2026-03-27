@@ -20,6 +20,17 @@ async function getNextQuotationNumber() {
   return 'Q-' + String(nextSeq).padStart(4, '0');
 }
 
+// GET /api/quotation/next-number
+router.get('/next-number', async (req, res) => {
+  try {
+    const nextNumber = await getNextQuotationNumber();
+    res.json({ nextNumber });
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ error: 'Server Error' });
+  }
+});
+
 // POST /api/quotation/generate-preview
 router.post('/generate-preview', async (req, res) => {
   try {
@@ -154,6 +165,21 @@ router.delete('/:id', async (req, res) => {
     const deletedQuotation = await Quotation.findByIdAndDelete(req.params.id);
     if (!deletedQuotation) return res.status(404).json({ error: 'Quotation not found' });
     res.json({ message: 'Quotation deleted successfully' });
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ error: 'Server Error' });
+  }
+});
+
+// POST /api/quotation/bulk-delete
+router.post('/bulk-delete', async (req, res) => {
+  try {
+    const { ids } = req.body;
+    if (!ids || !Array.isArray(ids)) {
+      return res.status(400).json({ error: 'ids array is required' });
+    }
+    const result = await Quotation.deleteMany({ _id: { $in: ids } });
+    res.json({ message: `${result.deletedCount} quotations deleted successfully` });
   } catch (error) {
     console.error(error);
     res.status(500).json({ error: 'Server Error' });

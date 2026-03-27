@@ -80,4 +80,19 @@ router.delete('/:id', async (req, res) => {
   }
 });
 
+// POST /api/package/bulk-delete
+router.post('/bulk-delete', async (req, res) => {
+  try {
+    const { ids } = req.body;
+    if (!ids || !Array.isArray(ids)) {
+      return res.status(400).json({ error: 'ids array is required' });
+    }
+    const result = await Package.deleteMany({ _id: { $in: ids } });
+    res.json({ message: `${result.deletedCount} packages deleted successfully` });
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ error: 'Server Error' });
+  }
+});
+
 module.exports = router;

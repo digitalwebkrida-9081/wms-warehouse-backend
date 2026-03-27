@@ -141,4 +141,31 @@ router.delete('/:id', async (req, res) => {
   }
 });
 
+// POST /api/outward/bulk-delete
+router.post('/bulk-delete', async (req, res) => {
+  try {
+    const { ids } = req.body;
+    if (!ids || !Array.isArray(ids)) {
+      return res.status(400).json({ error: 'ids array is required' });
+    }
+    
+    // Find all affected outwards to know which inwardIds to recalculate
+    const affectedOutwards = await Outward.find({ _id: { $in: ids } });
+    const inwardIds = [...new Set(affectedOutwards.map(o => o.inwardId.toString()))];
+    
+    // Delete the outwards
+    const result = await Outward.deleteMany({ _id: { $in: ids } });
+    
+    // Recalculate remaining weight for each affected inward
+    for (const inwardId of inwardIds) {
+      await updateRemainingWeight(inwardId);
+    }
+    
+    res.json({ message: `${result.deletedCount} outwards deleted successfully` });
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ error: 'Server Error' });
+  }
+});
+
 module.exports = router;
