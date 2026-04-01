@@ -9,6 +9,7 @@ const QuotationSchema = new mongoose.Schema({
     inwardId: { type: mongoose.Schema.Types.ObjectId, ref: 'Inward' },
     description: { type: String },
     quantity: { type: Number },
+    unitWeight: { type: Number },
     weight: { type: Number },
     remaining: { type: Number },
     inDate: { type: String },

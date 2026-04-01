@@ -62,6 +62,7 @@ router.post('/generate-preview', async (req, res) => {
         inwardId: inw._id,
         description: `${inw.productId} (Inward ${inw.inwardNumber || inw._id.toString().slice(-6)})`,
         quantity: inw.quantity || 0,
+        unitWeight: inw.unitWeight || 0,
         weight: inw.totalWeight,
         remaining: inw.remainingWeight,
         inDate: inw.inwardDate,

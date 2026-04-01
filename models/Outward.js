@@ -6,6 +6,8 @@ const OutwardSchema = new mongoose.Schema({
   partyId: { type: String, required: true },
   productId: { type: String, required: true },
   outwardWeight: { type: Number, required: true },
+  quantity: { type: Number, default: 0 },
+  unitWeight: { type: Number, default: 0 },
   goodsCondition: { type: String, default: '' },
   remarks: { type: String, default: '' }
 }, {

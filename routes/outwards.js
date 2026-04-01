@@ -6,17 +6,24 @@ const Inward = require('../models/Inward');
 /**
  * Helper to recalculate remaining weight of an Inward based on its totalWeight and all its Outwards.
  */
-async function updateRemainingWeight(inwardId) {
+async function updateInwardInventory(inwardId) {
   const inward = await Inward.findById(inwardId);
   if (!inward) return;
 
   const results = await Outward.aggregate([
     { $match: { inwardId: inward._id } },
-    { $group: { _id: '$inwardId', totalOut: { $sum: '$outwardWeight' } } }
+    { $group: { 
+      _id: '$inwardId', 
+      totalOutWeight: { $sum: '$outwardWeight' },
+      totalOutQuantity: { $sum: '$quantity' }
+    } }
   ]);
 
-  const totalOut = results.length > 0 ? results[0].totalOut : 0;
-  inward.remainingWeight = inward.totalWeight - totalOut;
+  const totalOutWeight = results.length > 0 ? results[0].totalOutWeight : 0;
+  const totalOutQuantity = results.length > 0 ? results[0].totalOutQuantity : 0;
+  
+  inward.remainingWeight = inward.totalWeight - totalOutWeight;
+  inward.remainingQuantity = (inward.quantity || 0) - totalOutQuantity;
   await inward.save();
 }
 
@@ -52,7 +59,7 @@ router.get('/', async (req, res) => {
       .sort({ createdAt: -1 })
       .skip(start)
       .limit(pageSize)
-      .populate('inwardId', 'inwardDate totalWeight remainingWeight');
+      .populate('inwardId', 'inwardDate totalWeight remainingWeight remainingQuantity');
 
     res.json({
       data: outwards.map(outward => {
@@ -82,10 +89,10 @@ router.post('/', async (req, res) => {
     await newOutward.save();
 
     // After saving, update the Inward remaining weight
-    await updateRemainingWeight(newOutward.inwardId);
+    await updateInwardInventory(newOutward.inwardId);
 
     // Re-populate for response
-    const populated = await Outward.findById(newOutward._id).populate('inwardId', 'inwardDate totalWeight remainingWeight');
+    const populated = await Outward.findById(newOutward._id).populate('inwardId', 'inwardDate totalWeight remainingWeight remainingQuantity');
     res.status(201).json(populated.toJSON());
   } catch (error) {
     console.error(error);
@@ -110,12 +117,12 @@ router.put('/:id', async (req, res) => {
     );
 
     // If inwardId changed, update both. Otherwise update one.
-    await updateRemainingWeight(updatedOutward.inwardId);
+    await updateInwardInventory(updatedOutward.inwardId);
     if (oldInwardId.toString() !== updatedOutward.inwardId.toString()) {
-      await updateRemainingWeight(oldInwardId);
+      await updateInwardInventory(oldInwardId);
     }
 
-    const populated = await Outward.findById(updatedOutward._id).populate('inwardId', 'inwardDate totalWeight remainingWeight');
+    const populated = await Outward.findById(updatedOutward._id).populate('inwardId', 'inwardDate totalWeight remainingWeight remainingQuantity');
     res.json(populated.toJSON());
   } catch (error) {
     console.error(error);
@@ -132,7 +139,7 @@ router.delete('/:id', async (req, res) => {
     }
 
     // After deletion, restore the Inward remaining weight
-    await updateRemainingWeight(deletedOutward.inwardId);
+    await updateInwardInventory(deletedOutward.inwardId);
 
     res.json({ success: true });
   } catch (error) {
@@ -158,7 +165,7 @@ router.post('/bulk-delete', async (req, res) => {
     
     // Recalculate remaining weight for each affected inward
     for (const inwardId of inwardIds) {
-      await updateRemainingWeight(inwardId);
+      await updateInwardInventory(inwardId);
     }
     
     res.json({ message: `${result.deletedCount} outwards deleted successfully` });

@@ -7,6 +7,8 @@ const InwardSchema = new mongoose.Schema({
   totalWeight: { type: Number, required: true },
   remainingWeight: { type: Number, required: true },
   quantity: { type: Number, default: 0 },
+  remainingQuantity: { type: Number, default: 0 },
+  unitWeight: { type: Number, default: 0 },
   price: { type: Number, default: 0 },
   additionalCharges: { type: Number, default: 0 },
   goodsCondition: { type: String, default: '' },

@@ -48,6 +48,7 @@ router.post('/generate-from-inwards', async (req, res) => {
         inwardId: inw._id,
         description: `${inw.productId} - ${billPeriod}`,
         quantity: inw.quantity || 0,
+        unitWeight: inw.unitWeight || 0,
         weight: inw.totalWeight,
         remaining: inw.remainingWeight,
         inDate: inw.inwardDate,
@@ -122,7 +123,8 @@ router.post('/generate-from-outward', async (req, res) => {
       return {
         inwardId: out.inwardId,
         description: `${out.productId} - Released (${billPeriod})`,
-        quantity: 0, // Outwards are usually by weight
+        quantity: out.quantity || 0, 
+        unitWeight: out.unitWeight || 0,
         weight: weight,
         remaining: 0, 
         inDate: parentInward ? parentInward.inwardDate : null,
@@ -199,6 +201,7 @@ router.post('/generate-preview', async (req, res) => {
         inwardId: inw._id,
         description: `${inw.productId} (Inward ${inw.inwardNumber || inw._id.toString().slice(-6)})`,
         quantity: inw.quantity || 0,
+        unitWeight: inw.unitWeight || 0,
         weight: inw.totalWeight,
         remaining: inw.remainingWeight,
         inDate: inw.inwardDate,
