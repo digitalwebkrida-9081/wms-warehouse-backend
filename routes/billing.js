@@ -41,9 +41,8 @@ router.post('/generate-from-inwards', async (req, res) => {
       // Find latest outward for this inward to show as "Out Date"
       const lastOutward = await Outward.findOne({ inwardId: inw._id }).sort({ outwardDate: -1 });
 
-      let months = 1;
-      const sub = inw.totalWeight * (inw.price || 0) * months;
-      const tax = (sub * (gstRate || 0)) / 100;
+      const price = inw.price || 0;
+      const amount = (inw.quantity || 0) * price;
       return {
         inwardId: inw._id,
         description: `${inw.productId} - ${billPeriod}`,
@@ -53,15 +52,16 @@ router.post('/generate-from-inwards', async (req, res) => {
         remaining: inw.remainingWeight,
         inDate: inw.inwardDate,
         outDate: lastOutward ? lastOutward.outwardDate : null,
-        rate: inw.price || 0,
-        months: months,
+        rate: price,
+        months: 1, // Defaulting to 1
         tax: gstRate || 0,
-        total: sub + tax
+        amount: amount,
+        total: amount // Item amount is Quantity X Price
       };
     }));
 
-    const subTotal = lineItems.reduce((acc, item) => acc + (item.weight * item.rate * item.months), 0);
-    const taxTotal = lineItems.reduce((acc, item) => acc + (item.total - (item.weight * item.rate * item.months)), 0);
+    const subTotal = lineItems.reduce((acc, item) => acc + item.total, 0);
+    const taxTotal = (subTotal * (gstRate || 0)) / 100;
     const grandTotal = subTotal + taxTotal;
     const partyName = inwards[0].partyId; 
     const partyData = await Party.findOne({ name: partyName });
@@ -114,30 +114,28 @@ router.post('/generate-from-outward', async (req, res) => {
       // Find parent inward to get the price and product details
       const parentInward = await Inward.findById(out.inwardId);
       
-      let months = 1;
       const rate = parentInward ? (parentInward.price || 0) : 0;
-      const weight = out.outwardWeight;
-      const sub = weight * rate * months;
-      const tax = (sub * (gstRate || 0)) / 100;
+      const amount = (out.quantity || 0) * rate; // Quantity X Price
       
       return {
         inwardId: out.inwardId,
         description: `${out.productId} - Released (${billPeriod})`,
         quantity: out.quantity || 0, 
         unitWeight: out.unitWeight || 0,
-        weight: weight,
+        weight: out.outwardWeight,
         remaining: 0, 
         inDate: parentInward ? parentInward.inwardDate : null,
         outDate: out.outwardDate,
         rate: rate,
-        months: months,
+        months: 1,
         tax: gstRate || 0,
-        total: sub + tax
+        total: amount,
+        amount: amount
       };
     }));
 
-    const subTotal = lineItems.reduce((acc, item) => acc + (item.weight * item.rate * item.months), 0);
-    const taxTotal = lineItems.reduce((acc, item) => acc + (item.total - (item.weight * item.rate * item.months)), 0);
+    const subTotal = lineItems.reduce((acc, item) => acc + item.total, 0);
+    const taxTotal = (subTotal * (gstRate || 0)) / 100;
     const grandTotal = subTotal + taxTotal;
     
     const partyName = outwards[0].partyId;
@@ -187,9 +185,9 @@ router.post('/generate-preview', async (req, res) => {
     const lineItems = await Promise.all(inwards.map(async inw => {
       const rate = inw.price || 0;
       const taxPercent = 0; // Default tax 0, user can edit
-      const itemSubTotal = inw.totalWeight * rate;
+      const itemSubTotal = (inw.quantity || 0) * rate; // Quantity X Price
       const itemTaxTotal = (itemSubTotal * taxPercent) / 100;
-      const itemTotal = itemSubTotal + itemTaxTotal;
+      const itemTotal = itemSubTotal; // User says amount is Qty X Price
 
       subTotal += itemSubTotal;
       taxTotal += itemTaxTotal;
@@ -209,6 +207,7 @@ router.post('/generate-preview', async (req, res) => {
         rate: rate,
         months: 1, // Defaulting to 1 month for previews, can be edited
         tax: taxPercent,
+        amount: itemTotal,
         total: itemTotal
       };
     }));

@@ -48,11 +48,10 @@ router.post('/generate-preview', async (req, res) => {
     const lineItems = await Promise.all(inwards.map(async inw => {
       const rate = inw.price || 0;
       const taxPercent = 0; 
-      const itemSubTotal = inw.totalWeight * rate;
-      const itemTaxTotal = (itemSubTotal * taxPercent) / 100;
-      const itemTotal = itemSubTotal + itemTaxTotal;
+      const amount = (inw.quantity || 0) * rate; // Quantity X Price
+      const itemTaxTotal = (amount * taxPercent) / 100;
 
-      subTotal += itemSubTotal;
+      subTotal += amount;
       taxTotal += itemTaxTotal;
 
       // Find latest outward for this inward to show as "Out Date"
@@ -70,7 +69,8 @@ router.post('/generate-preview', async (req, res) => {
         rate: rate,
         months: 1,
         tax: taxPercent,
-        total: itemTotal
+        amount: amount,
+        total: amount
       };
     }));
 
