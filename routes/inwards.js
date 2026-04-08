@@ -25,6 +25,28 @@ router.get('/', async (req, res) => {
     const total = await Inward.countDocuments(query);
     const start = (page - 1) * pageSize;
 
+    // Proactively migrate any legacy numeric additionalCharges for the whole collection
+    // This ensures that the subsequent .find() (which triggers Mongoose hydration) doesn't fail.
+    await Inward.collection.updateMany(
+      { additionalCharges: { $type: "number" } },
+      [
+        {
+          $set: {
+            additionalCharges: [
+              {
+                label: "Legacy Charge",
+                chargeType: "fixed",
+                amount: "$additionalCharges",
+                unit: "fixed",
+                value: 0,
+                rate: 0
+              }
+            ]
+          }
+        }
+      ]
+    );
+
     // fetch descending order matching Next's mock
     const inwards = await Inward.find(query)
       .sort({ createdAt: -1 })

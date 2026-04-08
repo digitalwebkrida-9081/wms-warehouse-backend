@@ -7,6 +7,27 @@ const Inward = require('../models/Inward');
  * Helper to recalculate remaining weight of an Inward based on its totalWeight and all its Outwards.
  */
 async function updateInwardInventory(inwardId) {
+  // Use raw collection access to avoid Mongoose casting errors during find
+  const rawInward = await Inward.collection.findOne({ _id: new (require('mongoose').Types.ObjectId)(inwardId) });
+  
+  if (rawInward && rawInward.additionalCharges && !Array.isArray(rawInward.additionalCharges)) {
+     const amount = Number(rawInward.additionalCharges) || 0;
+     const migrated = amount > 0 ? [{ 
+       label: 'Legacy Charge', 
+       chargeType: 'fixed', 
+       amount, 
+       unit: 'fixed', 
+       value: 0, 
+       rate: 0 
+     }] : [];
+     
+     // Update directly in DB bypasses Mongoose validation for the "broken" document
+     await Inward.collection.updateOne(
+       { _id: rawInward._id },
+       { $set: { additionalCharges: migrated } }
+     );
+  }
+
   const inward = await Inward.findById(inwardId);
   if (!inward) return;
 
@@ -53,6 +74,27 @@ router.get('/', async (req, res) => {
 
     const total = await Outward.countDocuments(query);
     const start = (page - 1) * pageSize;
+
+    // Proactively migrate any legacy numeric additionalCharges for the whole collection
+    await Outward.collection.updateMany(
+      { additionalCharges: { $type: "number" } },
+      [
+        {
+          $set: {
+            additionalCharges: [
+              {
+                label: "Legacy Charge",
+                chargeType: "fixed",
+                amount: "$additionalCharges",
+                unit: "fixed",
+                value: 0,
+                rate: 0
+              }
+            ]
+          }
+        }
+      ]
+    );
 
     // Join with Inward data so we can display inward details in the UI
     const outwards = await Outward.find(query)

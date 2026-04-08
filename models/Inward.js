@@ -10,7 +10,14 @@ const InwardSchema = new mongoose.Schema({
   remainingQuantity: { type: Number, default: 0 },
   unitWeight: { type: Number, default: 0 },
   price: { type: Number, default: 0 },
-  additionalCharges: { type: Number, default: 0 },
+  additionalCharges: [{
+    label: { type: String },
+    chargeType: { type: String, enum: ['quantity', 'weight', 'fixed'] },
+    unit: { type: String },
+    value: { type: Number },
+    rate: { type: Number },
+    amount: { type: Number }
+  }],
   goodsCondition: { type: String, default: '' },
   remarks: { type: String, default: '' },
   inwardNumber: { type: String, default: '' }

@@ -23,7 +23,7 @@ async function getNextBillNumber() {
 // POST /api/billing/generate-from-inwards
 router.post('/generate-from-inwards', async (req, res) => {
   try {
-    const { inwardIds, billPeriod, gstRate } = req.body;
+    const { inwardIds, billPeriod, gstRate, additionalCharges: manualCharges, storageMonths: reqMonths } = req.body;
     const Party = require('../models/Party'); // To fetch party info
 
     if (!inwardIds || !Array.isArray(inwardIds)) {
@@ -36,33 +36,76 @@ router.post('/generate-from-inwards', async (req, res) => {
     }
     // Generate sequential bill No: filling gaps if any
     const billNumber = await getNextBillNumber();
+    const storageMonths = Number(reqMonths) || 1;
+    const storageDays = Number(req.body.storageDays) || 0;
+    const billingCycle = req.body.billingCycle || 'months';
+
+    const effectiveMonths = billingCycle === 'days' ? (storageDays / 30) : storageMonths;
 
     const lineItems = await Promise.all(inwards.map(async inw => {
       // Find latest outward for this inward to show as "Out Date"
       const lastOutward = await Outward.findOne({ inwardId: inw._id }).sort({ outwardDate: -1 });
 
       const price = inw.price || 0;
-      const amount = (inw.quantity || 0) * price;
+      const weight = inw.totalWeight || 0;
+      const amount = Number((weight * price * effectiveMonths).toFixed(2));
+      
       return {
         inwardId: inw._id,
         description: `${inw.productId} - ${billPeriod}`,
         quantity: inw.quantity || 0,
         unitWeight: inw.unitWeight || 0,
-        weight: inw.totalWeight,
+        weight: weight,
         remaining: inw.remainingWeight,
         inDate: inw.inwardDate,
         outDate: lastOutward ? lastOutward.outwardDate : null,
         rate: price,
-        months: 1, // Defaulting to 1
+        months: effectiveMonths,
         tax: gstRate || 0,
         amount: amount,
-        total: amount // Item amount is Quantity X Price
+        total: amount 
       };
     }));
 
     const subTotal = lineItems.reduce((acc, item) => acc + item.total, 0);
-    const taxTotal = (subTotal * (gstRate || 0)) / 100;
-    const grandTotal = subTotal + taxTotal;
+    const sumAdditionalCharges = (charges) => {
+      if (!charges) return 0;
+      if (Array.isArray(charges)) return charges.reduce((acc, c) => acc + (c.amount || 0), 0);
+      return Number(charges) || 0;
+    };
+    const totalInwardCharges = inwards.reduce((acc, inw) => acc + sumAdditionalCharges(inw.additionalCharges), 0);
+
+    // Manual charges from request body could be an array now or a number (backward compatibility)
+    const manualChargesAmount = Array.isArray(manualCharges) 
+      ? manualCharges.reduce((acc, c) => acc + (c.amount || 0), 0)
+      : (Number(manualCharges) || 0);
+
+    const totalAdditionalCharges = totalInwardCharges + manualChargesAmount;
+    
+    // Collect ALL charges for the bill's additionalCharges array
+    let structuredAdditionalCharges = [];
+    
+    // Add charges from inwards
+    inwards.forEach(inw => {
+      if (Array.isArray(inw.additionalCharges)) {
+        inw.additionalCharges.forEach(c => {
+          structuredAdditionalCharges.push({ ...c, label: `Inw: ${c.label}` });
+        });
+      } else if (Number(inw.additionalCharges) > 0) {
+        structuredAdditionalCharges.push({ label: 'Inward Extra Charge', chargeType: 'fixed', amount: Number(inw.additionalCharges) });
+      }
+    });
+
+    // Add manual charges from request
+    if (Array.isArray(manualCharges)) {
+      structuredAdditionalCharges = [...structuredAdditionalCharges, ...manualCharges];
+    } else if (Number(manualCharges) > 0) {
+      structuredAdditionalCharges.push({ label: 'Manual Extra Charge', chargeType: 'fixed', amount: Number(manualCharges) });
+    }
+
+    const taxTotal = Number(((subTotal * (gstRate || 0)) / 100).toFixed(2));
+    const grandTotal = subTotal + totalAdditionalCharges + taxTotal;
+
     const partyName = inwards[0].partyId; 
     const partyData = await Party.findOne({ name: partyName });
     const outwardDate = req.body.outwardDate || new Date().toISOString().split('T')[0];
@@ -76,7 +119,12 @@ router.post('/generate-from-inwards', async (req, res) => {
       taxTotal,
       grandTotal,
       outwardDate,
-      remarks: `Bill for period ${billPeriod}`
+      storageMonths,
+      storageDays,
+      billingCycle,
+      gst: gstRate || 0,
+      remarks: `Bill for period ${billPeriod}`,
+      additionalCharges: structuredAdditionalCharges
     });
 
     await newBill.save();
@@ -87,6 +135,9 @@ router.post('/generate-from-inwards', async (req, res) => {
       partyDetails: partyData || {}
     });
   } catch (error) {
+    if (error.code === 11000) {
+      return res.status(400).json({ error: `Duplicate bill number: ${req.body.billNumber || 'already exists'}. Please use a unique bill number.` });
+    }
     console.error(error);
     res.status(500).json({ error: 'Server Error' });
   }
@@ -95,7 +146,7 @@ router.post('/generate-from-inwards', async (req, res) => {
 // POST /api/billing/generate-from-outward
 router.post('/generate-from-outward', async (req, res) => {
   try {
-    const { outwardIds, billPeriod, gstRate, outwardDate } = req.body;
+    const { outwardIds, billPeriod, gstRate, outwardDate, additionalCharges: manualCharges, storageMonths: reqMonths } = req.body;
     const Party = require('../models/Party'); 
 
     if (!outwardIds || !Array.isArray(outwardIds)) {
@@ -109,34 +160,74 @@ router.post('/generate-from-outward', async (req, res) => {
 
     // Generate sequential bill No
     const billNumber = await getNextBillNumber();
+    const storageMonths = Number(reqMonths) || 1;
+    const storageDays = Number(req.body.storageDays) || 0;
+    const billingCycle = req.body.billingCycle || 'months';
+
+    const effectiveMonths = billingCycle === 'days' ? (storageDays / 30) : storageMonths;
 
     const lineItems = await Promise.all(outwards.map(async out => {
       // Find parent inward to get the price and product details
       const parentInward = await Inward.findById(out.inwardId);
       
       const rate = parentInward ? (parentInward.price || 0) : 0;
-      const amount = (out.quantity || 0) * rate; // Quantity X Price
+      const weight = out.outwardWeight || 0;
+      const amount = Number((weight * rate * effectiveMonths).toFixed(2));
       
       return {
         inwardId: out.inwardId,
         description: `${out.productId} - Released (${billPeriod})`,
         quantity: out.quantity || 0, 
         unitWeight: out.unitWeight || 0,
-        weight: out.outwardWeight,
+        weight: weight,
         remaining: 0, 
         inDate: parentInward ? parentInward.inwardDate : null,
-        outDate: out.outwardDate,
+        outDate: outwardDate || out.outwardDate,
         rate: rate,
-        months: 1,
+        months: effectiveMonths,
         tax: gstRate || 0,
-        total: amount,
-        amount: amount
+        amount: amount,
+        total: amount
       };
     }));
 
     const subTotal = lineItems.reduce((acc, item) => acc + item.total, 0);
-    const taxTotal = (subTotal * (gstRate || 0)) / 100;
-    const grandTotal = subTotal + taxTotal;
+    const sumAdditionalCharges = (charges) => {
+      if (!charges) return 0;
+      if (Array.isArray(charges)) return charges.reduce((acc, c) => acc + (c.amount || 0), 0);
+      return Number(charges) || 0;
+    };
+    const totalOutwardCharges = outwards.reduce((acc, out) => acc + sumAdditionalCharges(out.additionalCharges), 0);
+    
+    // Manual charges from request body
+    const manualChargesAmount = Array.isArray(manualCharges) 
+      ? manualCharges.reduce((acc, c) => acc + (c.amount || 0), 0)
+      : (Number(manualCharges) || 0);
+
+    const totalAdditionalCharges = totalOutwardCharges + manualChargesAmount;
+    
+    // Collect ALL charges
+    let structuredAdditionalCharges = [];
+    
+    // Add charges from outwards
+    outwards.forEach(out => {
+      if (Array.isArray(out.additionalCharges)) {
+        out.additionalCharges.forEach(c => {
+          structuredAdditionalCharges.push({ ...c, label: `Out: ${c.label}` });
+        });
+      } else if (Number(out.additionalCharges) > 0) {
+        structuredAdditionalCharges.push({ label: 'Outward Extra Charge', chargeType: 'fixed', amount: Number(out.additionalCharges) });
+      }
+    });
+
+    if (Array.isArray(manualCharges)) {
+      structuredAdditionalCharges = [...structuredAdditionalCharges, ...manualCharges];
+    } else if (Number(manualCharges) > 0) {
+      structuredAdditionalCharges.push({ label: 'Manual Extra Charge', chargeType: 'fixed', amount: Number(manualCharges) });
+    }
+
+    const taxTotal = Number(((subTotal * (gstRate || 0)) / 100).toFixed(2));
+    const grandTotal = subTotal + totalAdditionalCharges + taxTotal;
     
     const partyName = outwards[0].partyId;
     const partyData = await Party.findOne({ name: partyName });
@@ -151,7 +242,12 @@ router.post('/generate-from-outward', async (req, res) => {
       taxTotal,
       grandTotal,
       outwardDate: finalOutwardDate,
-      remarks: `Outward Bill for period ${billPeriod}`
+      storageMonths,
+      storageDays,
+      billingCycle,
+      gst: gstRate || 0,
+      remarks: `Outward Bill for period ${billPeriod}`,
+      additionalCharges: structuredAdditionalCharges
     });
 
     await newBill.save();
@@ -161,6 +257,9 @@ router.post('/generate-from-outward', async (req, res) => {
       partyDetails: partyData || {}
     });
   } catch (error) {
+    if (error.code === 11000) {
+      return res.status(400).json({ error: `Duplicate bill number: ${req.body.billNumber || 'already exists'}. Please use a unique bill number.` });
+    }
     console.error(error);
     res.status(500).json({ error: 'Server Error' });
   }
@@ -171,27 +270,24 @@ router.post('/generate-from-outward', async (req, res) => {
 // returns data needed for the frontend bill-creation screen
 router.post('/generate-preview', async (req, res) => {
   try {
-    const { inwardIds } = req.body;
+    const { inwardIds, storageMonths: reqMonths, storageDays: reqDays, billingCycle: reqCycle } = req.body;
 
     if (!inwardIds || !Array.isArray(inwardIds)) {
       return res.status(400).json({ error: 'inwardIds array is required' });
     }
 
     const inwards = await Inward.find({ _id: { $in: inwardIds } });
+    const storageMonths = Number(reqMonths) || 1;
+    const storageDays = Number(reqDays) || 0;
+    const billingCycle = reqCycle || 'months';
 
-    let subTotal = 0;
-    let taxTotal = 0;
+    const effectiveMonths = billingCycle === 'days' ? (storageDays / 30) : storageMonths;
 
     const lineItems = await Promise.all(inwards.map(async inw => {
       const rate = inw.price || 0;
       const taxPercent = 0; // Default tax 0, user can edit
-      const itemSubTotal = (inw.quantity || 0) * rate; // Quantity X Price
-      const itemTaxTotal = (itemSubTotal * taxPercent) / 100;
-      const itemTotal = itemSubTotal; // User says amount is Qty X Price
-
-      subTotal += itemSubTotal;
-      taxTotal += itemTaxTotal;
-
+      const itemSubTotal = Number(((inw.totalWeight || 0) * rate * effectiveMonths).toFixed(2)); // totalWeight X Price X Months
+      
       // Find latest outward for this inward to show as "Out Date"
       const lastOutward = await Outward.findOne({ inwardId: inw._id }).sort({ outwardDate: -1 });
 
@@ -205,12 +301,32 @@ router.post('/generate-preview', async (req, res) => {
         inDate: inw.inwardDate,
         outDate: lastOutward ? lastOutward.outwardDate : null,
         rate: rate,
-        months: 1, // Defaulting to 1 month for previews, can be edited
+        months: effectiveMonths, 
         tax: taxPercent,
-        amount: itemTotal,
-        total: itemTotal
+        amount: itemSubTotal,
+        total: itemSubTotal
       };
     }));
+
+    const subTotal = lineItems.reduce((acc, item) => acc + (item.total || 0), 0);
+    const taxTotal = lineItems.reduce((acc, item) => acc + ((item.total || 0) * (item.tax || 0)) / 100, 0);
+    
+    const sumAdditionalCharges = (charges) => {
+      if (!charges) return 0;
+      if (Array.isArray(charges)) return charges.reduce((acc, c) => acc + (c.amount || 0), 0);
+      return Number(charges) || 0;
+    };
+    // Collect record-specific charges
+    const recordAdditionalCharges = [];
+    inwards.forEach(inw => {
+      if (Array.isArray(inw.additionalCharges)) {
+        inw.additionalCharges.forEach(c => recordAdditionalCharges.push({ ...c, label: `Inw: ${c.label}` }));
+      } else if (Number(inw.additionalCharges) > 0) {
+        recordAdditionalCharges.push({ label: 'Inward Extra Charge', chargeType: 'fixed', amount: Number(inw.additionalCharges) });
+      }
+    });
+
+    const totalAdditionalCharges = recordAdditionalCharges.reduce((acc, c) => acc + (c.amount || 0), 0);
 
     const billIdSug = await getNextBillNumber();
 
@@ -221,12 +337,15 @@ router.post('/generate-preview', async (req, res) => {
       lineItems,
       subTotal,
       taxTotal,
-      grandTotal: subTotal + taxTotal,
+      grandTotal: subTotal + taxTotal + totalAdditionalCharges,
       outwardDate: new Date().toISOString().split('T')[0],
-      storageMonths: 1
+      storageMonths: storageMonths,
+      storageDays: storageDays,
+      billingCycle: billingCycle,
+      additionalCharges: recordAdditionalCharges
     });
   } catch (error) {
-    console.error(error);
+    console.error("Preview Generation Error:", error);
     res.status(500).json({ error: 'Server Error' });
   }
 });
@@ -247,6 +366,9 @@ router.post('/', async (req, res) => {
       partyDetails: partyData || {}
     });
   } catch (error) {
+    if (error.code === 11000) {
+      return res.status(400).json({ error: `Bill number '${req.body.billNumber}' already present. Duplicate bill can not generate.` });
+    }
     console.error(error);
     res.status(500).json({ error: 'Server Error' });
   }

@@ -34,26 +34,24 @@ router.get('/next-number', async (req, res) => {
 // POST /api/quotation/generate-preview
 router.post('/generate-preview', async (req, res) => {
   try {
-    const { inwardIds } = req.body;
+    const { inwardIds, storageMonths: reqMonths, storageDays: reqDays, billingCycle: reqCycle } = req.body;
 
     if (!inwardIds || !Array.isArray(inwardIds)) {
       return res.status(400).json({ error: 'inwardIds array is required' });
     }
 
     const inwards = await Inward.find({ _id: { $in: inwardIds } });
+    const storageMonths = Number(reqMonths) || 1;
+    const storageDays = Number(reqDays) || 0;
+    const billingCycle = reqCycle || 'months';
 
-    let subTotal = 0;
-    let taxTotal = 0;
+    const effectiveMonths = billingCycle === 'days' ? (storageDays / 30) : storageMonths;
 
     const lineItems = await Promise.all(inwards.map(async inw => {
       const rate = inw.price || 0;
       const taxPercent = 0; 
-      const amount = (inw.quantity || 0) * rate; // Quantity X Price
-      const itemTaxTotal = (amount * taxPercent) / 100;
-
-      subTotal += amount;
-      taxTotal += itemTaxTotal;
-
+      const amount = Number(((inw.totalWeight || 0) * rate * effectiveMonths).toFixed(2)); // totalWeight X Price X Months
+      
       // Find latest outward for this inward to show as "Out Date"
       const lastOutward = await Outward.findOne({ inwardId: inw._id }).sort({ outwardDate: -1 });
 
@@ -67,12 +65,32 @@ router.post('/generate-preview', async (req, res) => {
         inDate: inw.inwardDate,
         outDate: lastOutward ? lastOutward.outwardDate : null,
         rate: rate,
-        months: 1,
+        months: effectiveMonths,
         tax: taxPercent,
         amount: amount,
         total: amount
       };
     }));
+
+    const subTotal = lineItems.reduce((acc, item) => acc + (item.total || 0), 0);
+    const taxTotal = lineItems.reduce((acc, item) => acc + ((item.total || 0) * (item.tax || 0)) / 100, 0);
+
+    const sumAdditionalCharges = (charges) => {
+      if (!charges) return 0;
+      if (Array.isArray(charges)) return charges.reduce((acc, c) => acc + (c.amount || 0), 0);
+      return Number(charges) || 0;
+    };
+    const totalAdditionalCharges = inwards.reduce((acc, inw) => acc + sumAdditionalCharges(inw.additionalCharges), 0);
+
+    // Collect record-specific charges
+    const recordAdditionalCharges = [];
+    inwards.forEach(inw => {
+      if (Array.isArray(inw.additionalCharges)) {
+        inw.additionalCharges.forEach(c => recordAdditionalCharges.push({ ...c, label: `Inw: ${c.label}` }));
+      } else if (Number(inw.additionalCharges) > 0) {
+        recordAdditionalCharges.push({ label: 'Inward Extra Charge', chargeType: 'fixed', amount: Number(inw.additionalCharges) });
+      }
+    });
 
     const quotationIdSug = await getNextQuotationNumber();
 
@@ -83,11 +101,15 @@ router.post('/generate-preview', async (req, res) => {
       lineItems,
       subTotal,
       taxTotal,
-      grandTotal: subTotal + taxTotal,
-      outwardDate: new Date().toISOString().split('T')[0]
+      grandTotal: subTotal + taxTotal + totalAdditionalCharges,
+      outwardDate: new Date().toISOString().split('T')[0],
+      storageMonths: storageMonths,
+      storageDays: storageDays,
+      billingCycle: billingCycle,
+      additionalCharges: recordAdditionalCharges
     });
   } catch (error) {
-    console.error(error);
+    console.error("Quotation Preview Error:", error);
     res.status(500).json({ error: 'Server Error' });
   }
 });

@@ -24,11 +24,21 @@ const QuotationSchema = new mongoose.Schema({
   grandTotal: { type: Number, default: 0 },
   outwardDate: { type: String, default: '' },
   storageMonths: { type: Number, default: 1 },
+  storageDays: { type: Number, default: 0 },
+  billingCycle: { type: String, enum: ['days', 'months'], default: 'months' },
   gst: { type: Number, default: 0 },
   status: { type: String, enum: ['Approved', 'Pending', 'Rejected'], default: 'Pending' },
   paymentMode: { type: String, default: 'Cash' },
   validUntil: { type: String, default: '' },
-  remarks: { type: String, default: '' }
+  remarks: { type: String, default: '' },
+  additionalCharges: [{
+    label: { type: String },
+    chargeType: { type: String, enum: ['quantity', 'weight', 'fixed'] },
+    unit: { type: String },
+    value: { type: Number },
+    rate: { type: Number },
+    amount: { type: Number }
+  }]
 }, {
   timestamps: true
 });

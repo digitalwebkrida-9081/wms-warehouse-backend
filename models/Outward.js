@@ -9,7 +9,15 @@ const OutwardSchema = new mongoose.Schema({
   quantity: { type: Number, default: 0 },
   unitWeight: { type: Number, default: 0 },
   goodsCondition: { type: String, default: '' },
-  remarks: { type: String, default: '' }
+  remarks: { type: String, default: '' },
+  additionalCharges: [{
+    label: { type: String },
+    chargeType: { type: String, enum: ['quantity', 'weight', 'fixed'] },
+    unit: { type: String },
+    value: { type: Number },
+    rate: { type: Number },
+    amount: { type: Number }
+  }]
 }, {
   timestamps: true 
 });
